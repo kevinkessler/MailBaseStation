@@ -1,0 +1,2 @@
+To create the SPIFF configuration drive, rename this directory to data, and then fill out the correct values in secrests.json. 
+Run platformio run -t uploadfs to create the filesystem, and upload it to the ESP32.
