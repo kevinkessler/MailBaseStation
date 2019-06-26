@@ -1,6 +1,6 @@
 /**
  *  @filename   :   main.cpp
- *  @brief      :   Lora Mail Sensor Receiver
+ *  @brief      :   Lora Mail Sensor Base Station Receiver and MQTT Transmitter
  *
  *  @author     :   Kevin Kessler
  *
@@ -97,18 +97,19 @@ void connect() {
 }
 
 void readConfig() {
+
   if(!SPIFFS.begin()){
     Serial.println("SPIFFS begin failed");
     return;
   }
-
+ 
   File config = SPIFFS.open("/secrets.json",FILE_READ);
   if(!config) {
     Serial.println("File Open Failed");
     return;
   }
-  
-  StaticJsonDocument<256> secrets;
+
+  StaticJsonDocument<512> secrets;
   DeserializationError err = deserializeJson(secrets,config);
   if(err) {
     Serial.println("Error Deserializing Json");
@@ -118,40 +119,41 @@ void readConfig() {
 
 
   if((const char *)secrets["ssid"] != nullptr) {
-    ssid = (char *)malloc(sizeof(secrets["ssid"]) + 1);
+    ssid = (char *)malloc(strlen(secrets["ssid"]) + 1);
     strcpy(ssid,secrets["ssid"]);
   }else{
     Serial.println("ssid not found in secrets file");
   }
 
-  if((const char *)secrets["password"] != nullptr) {
-    pass = (char *)malloc(sizeof(secrets["password"]) + 1 );
+  if((const char *)secrets["password"] != nullptr) {;
+    pass = (char *)malloc(strlen(secrets["password"]) + 1 );
     strcpy(pass,secrets["password"]);
   }else{
     Serial.println("password not found in secrets file");
   }
 
   if((const char *)secrets["pskIdent"]!= nullptr) {
-    pskIdent = (char *)malloc(sizeof(secrets["pskIdent"]) +1);
+    pskIdent = (char *)malloc(strlen(secrets["pskIdent"]) +1);
     strcpy(pskIdent,secrets["pskIdent"]);
   } else {
     Serial.println("pskIdent not found in secrets file");
   }
-
+  
+  // Key must be max 28 Hex digits
   if((const char *)secrets["pskKey"] != nullptr) {
-    pskKey = (char *)malloc(sizeof(secrets["pskKey"]) +1);
+    pskKey = (char *)malloc(strlen(secrets["pskKey"]) +1);
     strcpy(pskKey,secrets["pskKey"]);
   }else{
     Serial.println("pskKey not found in secrets file");
   }
 
   if((const char *)secrets["mqtt_host"] != nullptr) {
-    mqtt_host = (char *)malloc(sizeof(secrets["mqtt_host"])+1);
+    mqtt_host = (char *)malloc(strlen(secrets["mqtt_host"])+1);
     strcpy(mqtt_host,secrets["mqtt_host"]);
   }else{
     Serial.println("mqtt_host not found in secrets file");
   }
-  
+
   if(secrets["mqtt_port"] != 0) {
     mqtt_port = secrets["mqtt_port"];
   }else{
@@ -196,9 +198,8 @@ void setup() {
   Serial.begin(115200);
 
   readConfig();
-
+  
   WiFi.begin(ssid, pass);
-
   // attempt to connect to Wifi network:
   while (WiFi.status() != WL_CONNECTED) {
     Serial.print(".");
@@ -210,6 +211,7 @@ void setup() {
   if(!MDNS.begin(hostname)) {
     Serial.println("MDNS Failed");
   }
+  
   otaSetup();
 
   net.setPreSharedKey(pskIdent, pskKey);
@@ -242,20 +244,21 @@ void loop() {
     Serial.println("Sending Beat");
     sendMQTTMessage(2,127);
 
-    if(servoPos == 0) {
-      servoPos = 90;
-    }else{
-      servoPos = 0;
-    }
-
     sendHeartbeat = false;
   }
 
   if(e.dataAvailable()) {
-    uint8_t data;
-    e.receiveData(&data, 1);
-    bool mailFlag = 0x80 & data;
-    uint8_t battery = 0x7f & data;
+    Serial.print("Data ");
+    uint8_t data[3];
+    e.receiveData(data, 3);
+    for(int n=0;n<3;n++) {
+      Serial.print(data[n],HEX);
+      Serial.print(" ");
+    }
+    Serial.println("");
+    
+    bool mailFlag = 0x80 & data[0];
+    uint8_t battery = 0x7f & data[0];
 
     if(mailFlag) {
       mailServo.write(90);
