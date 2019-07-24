@@ -221,51 +221,51 @@ void setup() {
 
   e32Setup();
 
-  heartBeat.attach(3,publishHeartbeat);
+  heartBeat.attach(300,publishHeartbeat);
 
   mailServo.attach(servoPin, minUs, maxUs);
   mailServo.write(0);
 
 }
 
-void sendMQTTMessage(uint8_t mailFlag, uint8_t battery) {
+void sendMQTTMessage(uint8_t prox, uint8_t flagADC, uint8_t battery, uint8_t temperature) {
+    if(!client.connected()){
+      Serial.println("Reconnect");
+      connect();
+    }
     char output[100];
-    sprintf(output,"{\"mailstate\":%d, \"battery\":%d}",mailFlag,battery);
+    double batt = ((double)battery+150)/100;
+    double temp = ((double)temperature)/2 -30;
+    sprintf(output,"{\"mailProximity\":%d, \"flagADC\":%d,\"battery\":%.2f,\"temperature\":%.1f}",prox,flagADC,batt,temp);
 
     client.publish(heartbeat_topic,output); 
 }
 
 void loop() {
   if (sendHeartbeat) {
-    if(!client.connected()){
-      Serial.println("Reconnect");
-      connect();
-    }
     Serial.println("Sending Beat");
-    sendMQTTMessage(2,127);
+    sendMQTTMessage(0,0,0,0);
 
     sendHeartbeat = false;
   }
 
   if(e.dataAvailable()) {
     Serial.print("Data ");
-    uint8_t data[3];
-    e.receiveData(data, 3);
-    for(int n=0;n<3;n++) {
+    uint8_t data[4];
+    e.receiveData(data, 4);
+    for(int n=0;n<4;n++) {
       Serial.print(data[n],HEX);
       Serial.print(" ");
     }
     Serial.println("");
-    
-    bool mailFlag = 0x80 & data[0];
-    uint8_t battery = 0x7f & data[0];
 
-    if(mailFlag) {
-      mailServo.write(90);
+    // Sensor threshold for mail 40, Flag ADC threshhold AC
+    if((data[0] > 0x40) && (data[1] > 0xAC)){
+        mailServo.write(90);
     } else {
       mailServo.write(0);
     }
-    sendMQTTMessage(mailFlag,battery);
+    sendMQTTMessage(data[0],data[1],data[2],data[3]);
   }
   
   ArduinoOTA.handle();
