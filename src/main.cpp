@@ -20,47 +20,196 @@
  *    along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
  */
+
 #include <Arduino.h>
-#include <WiFiClientSecure.h>
-#include <MQTT.h>
-#include <ESPmDNS.h>
 #include <ArduinoOTA.h>
-#include <FS.h>
-#include <SPIFFS.h>
-#include "ArduinoJson.h"
+#include <WiFi.h>          
+#include <DNSServer.h>
+#include <WebServer.h>
+#include <EEPROM.h>
+#include <WiFiManager.h>
 #include "Ticker.h"
 #include "ESP32_Servo.h"
-#include "E32Lora.h"
+#include "SoftwareSerial.h"
+#include "LoRa_E32.h"
+#include "maildisplay.h"
 
-char *ssid;
-char *pass;
-char *pskIdent;
-char *pskKey;
-char *mqtt_host;
-uint16_t mqtt_port;
+//#include <WiFiClientSecure.h>
+//#include <MQTT.h>
+//#include <ESPmDNS.h>
+//#include <ArduinoOTA.h>
+//#include <FS.h>
+//#include <SPIFFS.h>
+//#include "ArduinoJson.h"
 
-const char *heartbeat_topic = "/mailsensor";
+//#include "E32Lora.h"
+
 const char *hostname = "maildisplay";
+char mqttServer[MQTT_SERVER_LENGTH];
+char mqttTopic[MQTT_TOPIC_LENGTH];
+uint16_t mqttPort;
+bool configMode = false;
+uint8_t flash_toggle=0;
+volatile bool buttonLongPress = false; 
+volatile uint32_t lastPressTime;
+
+Ticker heartBeat(publishHeartbeat, 300000);
+
+struct mqttConfig {
+  uint32_t valid;
+  char server[MQTT_SERVER_LENGTH];
+  uint16_t port;
+  char topic[MQTT_TOPIC_LENGTH]; 
+};
 
 //E32 Hardware
 uint8_t m0=12;
 uint8_t m1=14;
 uint8_t aux=13;
 
+LoRa_E32 lora(&Serial2,16,17, aux, m0, m1);
+
 volatile bool sendHeartbeat = false;
 
-Ticker heartBeat;
-WiFiClientSecure net;
-MQTTClient client;
 Servo mailServo;
-E32Lora e(Serial2);
+//E32Lora e(Serial2);
 
 uint8_t servoPin = 22;
 uint16_t minUs = 500;
 uint16_t maxUs = 2400;
 uint8_t servoPos = 0;
 
-void e32Setup() {
+void configModeCallback(WiFiManager *wfm) {
+  Serial.println(F("Config Mode"));
+  Serial.println(WiFi.softAPIP());
+  configMode = true;
+  Serial.println(wfm->getConfigPortalSSID());
+}
+
+void printMQTT() {
+  Serial.print(F("Server "));
+  Serial.println(mqttServer);
+
+  Serial.print(F("Port "));
+  Serial.println(mqttPort,DEC);
+
+  Serial.print(F("Topic "));
+  Serial.println(mqttTopic);
+}
+
+void readEEPROM() {
+  mqttConfig conf;
+  EEPROM.get(0,conf);
+  
+  if (conf.valid ==0xDEADBEEF) {
+    strncpy(mqttServer, conf.server, MQTT_SERVER_LENGTH);
+    strncpy(mqttTopic, conf.topic, MQTT_TOPIC_LENGTH);
+    mqttPort=conf.port;
+  }
+  else {
+    WiFiManager wifiManager;
+
+    strncpy(mqttServer,"",MQTT_SERVER_LENGTH);
+    strncpy(mqttTopic,"",MQTT_TOPIC_LENGTH);
+    mqttPort = 1883;
+
+    Serial.println(F("Setup WIFI Manager"));
+    printMQTT();
+  
+    callWFM(false);
+  }
+}
+
+void writeEEPROM() {
+  Serial.println(F("Writing MQTT Config"));
+
+  mqttConfig conf;
+
+  conf.valid = 0xDEADBEEF;
+  strncpy(conf.server, mqttServer, MQTT_SERVER_LENGTH);
+  strncpy(conf.topic, mqttTopic, MQTT_TOPIC_LENGTH);
+  conf.port = mqttPort;
+
+  EEPROM.put(0,conf);
+  EEPROM.commit();
+}
+
+void callWFM(bool connect) {
+  WiFiManager wfm;
+
+  wfm.setAPCallback(configModeCallback);
+
+  WiFiManagerParameter mqtt_server("server", "MQTT Server", mqttServer, MQTT_SERVER_LENGTH);
+  char port_string[6];
+  itoa(mqttPort, port_string,10);
+  WiFiManagerParameter mqtt_port("port", "MQTT port", port_string, 6);
+  WiFiManagerParameter mqtt_topic("topic", "MQTT Topic", mqttTopic,MQTT_TOPIC_LENGTH);
+
+  wfm.addParameter(&mqtt_server);
+  wfm.addParameter(&mqtt_port);
+  wfm.addParameter(&mqtt_topic);
+
+  if(connect) {
+    if(!wfm.autoConnect()) {
+      Serial.println(F("Failed to connect and hit timeout"));
+      ESP.restart();
+      delay(5000);
+    }
+  } else {
+      if(!wfm.startConfigPortal()) {
+        Serial.println(F("Portal Error"));
+        ESP.restart();
+        delay(5000);
+    }
+
+  }
+
+  strncpy(mqttServer, mqtt_server.getValue(), MQTT_SERVER_LENGTH);
+  strncpy(mqttTopic, mqtt_topic.getValue(), MQTT_TOPIC_LENGTH);
+  mqttPort = atoi(mqtt_port.getValue());
+
+  if(configMode) 
+    writeEEPROM();
+  
+}
+
+void otaSetup() {
+
+  ArduinoOTA.setHostname(hostname);
+  ArduinoOTA.onStart([]() {
+    String type;
+    if (ArduinoOTA.getCommand() == U_FLASH)
+      type = "sketch";
+    else // U_SPIFFS
+      type = "filesystem";
+ 
+    Serial.println("Start updating " + type);
+  });
+  ArduinoOTA.onEnd([]() {
+    Serial.println("\nEnd");
+  });
+  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    Serial.printf("Progress: %u%%\n", (progress / (total / 100)));
+  });
+  ArduinoOTA.onError([](ota_error_t error) {
+    Serial.printf("Error[%u]: ", error);
+    if (error == OTA_AUTH_ERROR) {
+      Serial.println(F("Auth Failed"));
+    } else if (error == OTA_BEGIN_ERROR) {
+      Serial.println(F("Begin Failed"));
+    } else if (error == OTA_CONNECT_ERROR) {
+      Serial.println(F("Connect Failed"));
+    } else if (error == OTA_RECEIVE_ERROR) {
+      Serial.println(F("Receive Failed"));
+    } else if (error == OTA_END_ERROR) {
+      Serial.println(F("End Failed"));
+    }
+  });
+
+  ArduinoOTA.begin();
+}
+
+/*void e32Setup() {
   e.begin(m0,m1,aux);
   e.setMode(CONFIG_MODE);
   e.setTransmissionMode(TxMode_Fixed);
@@ -72,182 +221,92 @@ void e32Setup() {
   e.setMode(NORMAL_MODE); 
   e.reset();
 
+}*/
+
+void printParameters(struct Configuration configuration) {
+	Serial.println("----------------------------------------");
+
+	Serial.print(F("HEAD BIN: "));  Serial.print(configuration.HEAD, BIN);Serial.print(" ");Serial.print(configuration.HEAD, DEC);Serial.print(" ");Serial.println(configuration.HEAD, HEX);
+	Serial.println(F(" "));
+	Serial.print(F("AddH BIN: "));  Serial.println(configuration.ADDH, BIN);
+	Serial.print(F("AddL BIN: "));  Serial.println(configuration.ADDL, BIN);
+	Serial.print(F("Chan BIN: "));  Serial.print(configuration.CHAN, DEC); Serial.print(" -> "); Serial.println(configuration.getChannelDescription());
+	Serial.println(F(" "));
+	Serial.print(F("SpeedParityBit BIN    : "));  Serial.print(configuration.SPED.uartParity, BIN);Serial.print(" -> "); Serial.println(configuration.SPED.getUARTParityDescription());
+	Serial.print(F("SpeedUARTDataRate BIN : "));  Serial.print(configuration.SPED.uartBaudRate, BIN);Serial.print(" -> "); Serial.println(configuration.SPED.getUARTBaudRate());
+	Serial.print(F("SpeedAirDataRate BIN  : "));  Serial.print(configuration.SPED.airDataRate, BIN);Serial.print(" -> "); Serial.println(configuration.SPED.getAirDataRate());
+
+	Serial.print(F("OptionTrans BIN       : "));  Serial.print(configuration.OPTION.fixedTransmission, BIN);Serial.print(" -> "); Serial.println(configuration.OPTION.getFixedTransmissionDescription());
+	Serial.print(F("OptionPullup BIN      : "));  Serial.print(configuration.OPTION.ioDriveMode, BIN);Serial.print(" -> "); Serial.println(configuration.OPTION.getIODroveModeDescription());
+	Serial.print(F("OptionWakeup BIN      : "));  Serial.print(configuration.OPTION.wirelessWakeupTime, BIN);Serial.print(" -> "); Serial.println(configuration.OPTION.getWirelessWakeUPTimeDescription());
+	Serial.print(F("OptionFEC BIN         : "));  Serial.print(configuration.OPTION.fec, BIN);Serial.print(" -> "); Serial.println(configuration.OPTION.getFECDescription());
+	Serial.print(F("OptionPower BIN       : "));  Serial.print(configuration.OPTION.transmissionPower, BIN);Serial.print(" -> "); Serial.println(configuration.OPTION.getTransmissionPowerDescription());
+
+	Serial.println("----------------------------------------");
+
 }
 
+void e32Setup() {
+  lora.begin();
+
+  ResponseStructContainer c=lora.getConfiguration();
+  Configuration config=*(Configuration *)c.data;
+  Serial.println(c.status.getResponseDescription());
+  Serial.println(c.status.code);
+
+	printParameters(config);
+  config.ADDH = 0x00;
+  config.ADDL = 0x00;
+  config.CHAN = 0x0f;
+  config.OPTION.fixedTransmission = FT_FIXED_TRANSMISSION;
+  config.OPTION.transmissionPower = POWER_14;
+
+  ResponseStatus rs = lora.setConfiguration(config, WRITE_CFG_PWR_DWN_LOSE);
+  Serial.println(rs.getResponseDescription());
+  Serial.println(rs.code);
+
+}
 void publishHeartbeat()
 {
   sendHeartbeat = true;
 }
 
-void connect() {
-  Serial.print("checking wifi...");
-  while (WiFi.status() != WL_CONNECTED) {
-    Serial.print(".");
-    delay(1000);
-  }
-
-  Serial.print("\nconnecting...");
-  while (!client.connect("maildisplay")) {
-    Serial.print(".");
-    delay(1000);
-  }
-
-  Serial.println("\nMQTT connected!");
-
-}
-
-void readConfig() {
-
-  if(!SPIFFS.begin()){
-    Serial.println("SPIFFS begin failed");
-    return;
-  }
- 
-  File config = SPIFFS.open("/secrets.json",FILE_READ);
-  if(!config) {
-    Serial.println("File Open Failed");
-    return;
-  }
-
-  StaticJsonDocument<512> secrets;
-  DeserializationError err = deserializeJson(secrets,config);
-  if(err) {
-    Serial.println("Error Deserializing Json");
-    config.close();
-    return;
-  }
-
-
-  if((const char *)secrets["ssid"] != nullptr) {
-    ssid = (char *)malloc(strlen(secrets["ssid"]) + 1);
-    strcpy(ssid,secrets["ssid"]);
-  }else{
-    Serial.println("ssid not found in secrets file");
-  }
-
-  if((const char *)secrets["password"] != nullptr) {;
-    pass = (char *)malloc(strlen(secrets["password"]) + 1 );
-    strcpy(pass,secrets["password"]);
-  }else{
-    Serial.println("password not found in secrets file");
-  }
-
-  if((const char *)secrets["pskIdent"]!= nullptr) {
-    pskIdent = (char *)malloc(strlen(secrets["pskIdent"]) +1);
-    strcpy(pskIdent,secrets["pskIdent"]);
-  } else {
-    Serial.println("pskIdent not found in secrets file");
-  }
-  
-  // Key must be max 28 Hex digits
-  if((const char *)secrets["pskKey"] != nullptr) {
-    pskKey = (char *)malloc(strlen(secrets["pskKey"]) +1);
-    strcpy(pskKey,secrets["pskKey"]);
-  }else{
-    Serial.println("pskKey not found in secrets file");
-  }
-
-  if((const char *)secrets["mqtt_host"] != nullptr) {
-    mqtt_host = (char *)malloc(strlen(secrets["mqtt_host"])+1);
-    strcpy(mqtt_host,secrets["mqtt_host"]);
-  }else{
-    Serial.println("mqtt_host not found in secrets file");
-  }
-
-  if(secrets["mqtt_port"] != 0) {
-    mqtt_port = secrets["mqtt_port"];
-  }else{
-    Serial.println("mqtt_port not found in secrets file");
-  }
-  
-  config.close();
-}
-void otaSetup() {
-
-  ArduinoOTA.setHostname(hostname);
-  ArduinoOTA
-  .onStart([]() {
-    String type;
-    if (ArduinoOTA.getCommand() == U_FLASH)
-      type = "sketch";
-    else // U_SPIFFS
-      type = "filesystem";
-
-    SPIFFS.end();
-    Serial.println("Start updating " + type);
-  })
-  .onEnd([]() {
-    Serial.println("\nEnd");
-  })
-  .onProgress([](unsigned int progress, unsigned int total) {
-    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
-  })
-  .onError([](ota_error_t error) {
-    Serial.printf("Error[%u]: ", error);
-    if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
-    else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
-    else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
-    else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
-    else if (error == OTA_END_ERROR) Serial.println("End Failed");
-  });
-
-  ArduinoOTA.begin();
-}
-
 void setup() {
   Serial.begin(115200);
+  EEPROM.begin(128);
 
-  readConfig();
-  
-  WiFi.begin(ssid, pass);
-  // attempt to connect to Wifi network:
-  while (WiFi.status() != WL_CONNECTED) {
-    Serial.print(".");
-    // wait 1 second for re-trying
-    delay(1000); 
-  }
+  readEEPROM();
 
-  Serial.println(WiFi.localIP());
-  if(!MDNS.begin(hostname)) {
-    Serial.println("MDNS Failed");
-  }
-  
+  printMQTT();
+
+  callWFM(true);
+
   otaSetup();
 
-  net.setPreSharedKey(pskIdent, pskKey);
-  client.begin(mqtt_host, mqtt_port, net);
-
-  connect();
+  initMQTT();
 
   e32Setup();
-
-  heartBeat.attach(300,publishHeartbeat);
 
   mailServo.attach(servoPin, minUs, maxUs);
   mailServo.write(0);
 
-}
+  pinMode(CONFIG_BUTTON,INPUT);
+  attachInterrupt(CONFIG_BUTTON, longPress, CHANGE);
 
-void sendMQTTMessage(uint8_t prox, uint8_t flagADC, uint8_t battery, uint8_t temperature) {
-    if(!client.connected()){
-      Serial.println("Reconnect");
-      connect();
-    }
-    char output[100];
-    double batt = ((double)battery+150)/100;
-    double temp = ((double)temperature)/2 -30;
-    sprintf(output,"{\"mailProximity\":%d, \"flagADC\":%d,\"battery\":%.2f,\"temperature\":%.1f}",prox,flagADC,batt,temp);
+  heartBeat.start();
 
-    client.publish(heartbeat_topic,output); 
+  Serial.print(F("IP Addr "));
+  Serial.println(WiFi.localIP()); 
+
 }
 
 void loop() {
-  if (sendHeartbeat) {
+/*  if (sendHeartbeat) {
     Serial.println("Sending Beat");
     sendMQTTMessage(0,0,0,0);
 
     sendHeartbeat = false;
-  }
+  } 
 
   if(e.dataAvailable()) {
     Serial.print("Data ");
@@ -265,8 +324,47 @@ void loop() {
     } else {
       mailServo.write(0);
     }
-    sendMQTTMessage(data[0],data[1],data[2],data[3]);
+    publishData(data[0],data[1],data[2],data[3]);
+  } */
+
+  if(lora.available()>1) {
+    ResponseContainer rc = lora.receiveMessage();
+    Serial.println(rc.status.code);
+    uint8_t data[4];
+    memcpy(data,rc.data.c_str(),sizeof(data));
+    for(int n=0;n<4;n++) {
+      Serial.print(data[n],HEX);
+      Serial.print(" ");
+    }
+    Serial.println("");
+
+  }
+  if(buttonLongPress) {
+    callWFM(false);
+    buttonLongPress = false;
   }
   
+
+  heartBeat.update();
+
   ArduinoOTA.handle();
+}
+
+ICACHE_RAM_ATTR void longPress() {
+  uint8_t curState = digitalRead(CONFIG_BUTTON);
+  
+  if (curState) {
+  // Button Released
+    if((millis() - lastPressTime) > 1000)
+    {
+      buttonLongPress = true;
+    }
+
+  } else {
+  // Button Pressed
+    lastPressTime = millis();
+    buttonLongPress = false;
+  }
+
+
 }
