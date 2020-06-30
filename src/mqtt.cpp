@@ -33,7 +33,7 @@ extern char mqttServer[MQTT_SERVER_LENGTH];
 extern char mqttTopic[MQTT_TOPIC_LENGTH];
 extern uint16_t mqttPort;
 
-const char *configJson = "{\"device_class\":\"temperature\",\"name\": \"RailcoreFuse\",\"state_topic\": \"%s/%s\", \"unit_of_measurement\": \"°C\", \"value_template\": \"{{ value_json.temperature}}\" }";
+const char *configJson = "{\"device_class\":\"temperature\",\"name\": \"Mail\",\"state_topic\": \"%s/%s\", \"unit_of_measurement\": \"°C\", \"value_template\": \"{{ value_json.temperature}}\" }";
 const char *stateJson = "{\"mailProximity\":%d, \"flagADC\":%d,\"battery\":%.2f,\"temperature\":%.1f}";
 
 void mqttCallback(char *topic, byte *payload, uint16_t length) {
@@ -82,7 +82,7 @@ boolean publishConfig() {
 boolean publishData(uint8_t prox, uint8_t flagADC, uint8_t battery, uint8_t temperature) {
 
     char payload[100];
-    double batt = ((double)battery+150)/100;
+    double batt = ((double)battery+200)/100;
     double temp = ((double)temperature)/2 -30;
     sprintf(payload,stateJson,prox,flagADC,batt,temp);
     Serial.println(payload);

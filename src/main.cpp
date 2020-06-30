@@ -223,28 +223,6 @@ void otaSetup() {
 
 }*/
 
-void printParameters(struct Configuration configuration) {
-	Serial.println("----------------------------------------");
-
-	Serial.print(F("HEAD BIN: "));  Serial.print(configuration.HEAD, BIN);Serial.print(" ");Serial.print(configuration.HEAD, DEC);Serial.print(" ");Serial.println(configuration.HEAD, HEX);
-	Serial.println(F(" "));
-	Serial.print(F("AddH BIN: "));  Serial.println(configuration.ADDH, BIN);
-	Serial.print(F("AddL BIN: "));  Serial.println(configuration.ADDL, BIN);
-	Serial.print(F("Chan BIN: "));  Serial.print(configuration.CHAN, DEC); Serial.print(" -> "); Serial.println(configuration.getChannelDescription());
-	Serial.println(F(" "));
-	Serial.print(F("SpeedParityBit BIN    : "));  Serial.print(configuration.SPED.uartParity, BIN);Serial.print(" -> "); Serial.println(configuration.SPED.getUARTParityDescription());
-	Serial.print(F("SpeedUARTDataRate BIN : "));  Serial.print(configuration.SPED.uartBaudRate, BIN);Serial.print(" -> "); Serial.println(configuration.SPED.getUARTBaudRate());
-	Serial.print(F("SpeedAirDataRate BIN  : "));  Serial.print(configuration.SPED.airDataRate, BIN);Serial.print(" -> "); Serial.println(configuration.SPED.getAirDataRate());
-
-	Serial.print(F("OptionTrans BIN       : "));  Serial.print(configuration.OPTION.fixedTransmission, BIN);Serial.print(" -> "); Serial.println(configuration.OPTION.getFixedTransmissionDescription());
-	Serial.print(F("OptionPullup BIN      : "));  Serial.print(configuration.OPTION.ioDriveMode, BIN);Serial.print(" -> "); Serial.println(configuration.OPTION.getIODroveModeDescription());
-	Serial.print(F("OptionWakeup BIN      : "));  Serial.print(configuration.OPTION.wirelessWakeupTime, BIN);Serial.print(" -> "); Serial.println(configuration.OPTION.getWirelessWakeUPTimeDescription());
-	Serial.print(F("OptionFEC BIN         : "));  Serial.print(configuration.OPTION.fec, BIN);Serial.print(" -> "); Serial.println(configuration.OPTION.getFECDescription());
-	Serial.print(F("OptionPower BIN       : "));  Serial.print(configuration.OPTION.transmissionPower, BIN);Serial.print(" -> "); Serial.println(configuration.OPTION.getTransmissionPowerDescription());
-
-	Serial.println("----------------------------------------");
-
-}
 
 void e32Setup() {
   lora.begin();
@@ -254,18 +232,20 @@ void e32Setup() {
   Serial.println(c.status.getResponseDescription());
   Serial.println(c.status.code);
 
-	printParameters(config);
+	
   config.ADDH = 0x00;
   config.ADDL = 0x00;
   config.CHAN = 0x0f;
   config.OPTION.fixedTransmission = FT_FIXED_TRANSMISSION;
   config.OPTION.transmissionPower = POWER_14;
+  config.SPED.airDataRate = AIR_DATA_RATE_011_48;
 
   ResponseStatus rs = lora.setConfiguration(config, WRITE_CFG_PWR_DWN_LOSE);
   Serial.println(rs.getResponseDescription());
   Serial.println(rs.code);
 
 }
+
 void publishHeartbeat()
 {
   sendHeartbeat = true;
@@ -306,9 +286,9 @@ void loop() {
     sendMQTTMessage(0,0,0,0);
 
     sendHeartbeat = false;
-  } 
+  } */
 
-  if(e.dataAvailable()) {
+  /*if(e.dataAvailable()) {
     Serial.print("Data ");
     uint8_t data[4];
     e.receiveData(data, 4);
@@ -316,10 +296,10 @@ void loop() {
       Serial.print(data[n],HEX);
       Serial.print(" ");
     }
-    Serial.println("");
+    Serial.println("");*/
 
     // Sensor threshold for mail 40, Flag ADC threshhold AC
-    if((data[0] > 0x40) && (data[1] > 0xAC)){
+    /*if((data[0] > 0x40) && (data[1] > 0xAC)){
         mailServo.write(90);
     } else {
       mailServo.write(0);
@@ -328,17 +308,27 @@ void loop() {
   } */
 
   if(lora.available()>1) {
-    ResponseContainer rc = lora.receiveMessage();
+    ResponseStructContainer rc = lora.receiveMessage(4);
     Serial.println(rc.status.code);
-    uint8_t data[4];
-    memcpy(data,rc.data.c_str(),sizeof(data));
+    char bar[4];
+    bar[0]=0x90;
+    bar[1]=0x01;
+    bar[2]=0xaa;
+    bar[3]=0xbb;
+    String foo=String(bar);
+
+    //memcpy(data,rc.data.c_str(),sizeof(data));
+    uint8_t *data=(uint8_t *)rc.data;
+    
     for(int n=0;n<4;n++) {
       Serial.print(data[n],HEX);
       Serial.print(" ");
     }
     Serial.println("");
+    publishData(data[0],data[1],data[2],data[3]);
 
   }
+
   if(buttonLongPress) {
     callWFM(false);
     buttonLongPress = false;
