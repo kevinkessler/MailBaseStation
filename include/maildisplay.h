@@ -28,9 +28,12 @@
 
 #define CONFIG_BUTTON 0
 
+#define MAIL_THRESHOLD 128
+
 ICACHE_RAM_ATTR void longPress(void);
 void initMQTT(void);
-boolean publishData(uint8_t prox, uint8_t flagADC, uint8_t battery, uint8_t temperature);
+boolean publishLifecycle(const char *lc);
+boolean publishData(uint16_t prox, char *status, double battery, double temperature);
 boolean publishConfig(void);
 void publishHeartbeat(void);
 void callWFM(bool connect);

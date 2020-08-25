@@ -33,8 +33,12 @@ extern char mqttServer[MQTT_SERVER_LENGTH];
 extern char mqttTopic[MQTT_TOPIC_LENGTH];
 extern uint16_t mqttPort;
 
-const char *configJson = "{\"device_class\":\"temperature\",\"name\": \"Mail\",\"state_topic\": \"%s/%s\", \"unit_of_measurement\": \"°C\", \"value_template\": \"{{ value_json.temperature}}\" }";
-const char *stateJson = "{\"mailProximity\":%d, \"flagADC\":%d,\"battery\":%.2f,\"temperature\":%.1f}";
+const char *tempJson = "{\"device_class\":\"temperature\",\"name\": \"Mail_Temperature\",\"state_topic\": \"%s/%s\", \"unit_of_measurement\": \"°C\", \"value_template\": \"{{ value_json.temperature}}\" }";
+const char *proxJson = "{\"name\": \"Mail_Proximity\",\"state_topic\": \"%s/%s\", \"unit_of_measurement\": \"Count\", \"value_template\": \"{{ value_json.mailproximity}}\" }";
+const char *statusJson = "{\"name\": \"Mail_Status\",\"state_topic\": \"%s/%s\", \"value_template\": \"{{ value_json.status}}\" }";
+const char *batteryJson = "{\"name\": \"Mail_Battery\",\"state_topic\": \"%s/%s\", \"unit_of_measurement\": \"V\", \"value_template\": \"{{ value_json.battery}}\" }";
+const char *stateJson = "{\"lifecycle\":\"UPDATE\", \"mailproximity\":%d, \"status\":\"%.9s\",\"battery\":%.2f,\"temperature\":%.1f}";
+const char *lifecycleJson = "{\"name\": \"Mail_Lifecycle\",\"state_topic\": \"%s/%s\", \"unit_of_measurement\": \"\", \"value_template\": \"{{ value_json.lifecycle}}\" }";
 
 void mqttCallback(char *topic, byte *payload, uint16_t length) {
     Serial.printf("Message Received on topic %s\n", topic);
@@ -43,7 +47,6 @@ void mqttCallback(char *topic, byte *payload, uint16_t length) {
 static void reconnect() {
     if(mqttClient.connect(subName)) {
         Serial.println("MQTT Connected");
-        publishConfig();
     } else {
         char errorMes[50];
         sprintf(errorMes, "MQTT Connection failed, rc=%d",mqttClient.state());
@@ -69,22 +72,51 @@ static boolean publishMes(char *topic, char *payload) {
 }
 
 boolean publishConfig() {
-    uint8_t configLen = strlen(configJson);
-    char payload[configLen + MQTT_TOPIC_LENGTH + 10];
-    sprintf(payload,configJson,mqttTopic,"state");
+    char payload[512];
+    char topic[75];
 
-    char topic[MQTT_TOPIC_LENGTH+10];
-    sprintf(topic,"%s/%s",mqttTopic,"config");
+    sprintf(payload,tempJson,mqttTopic,"state");
+    sprintf(topic,"%s_temperature/%s",mqttTopic,"config");
+
+    publishMes(topic,payload);
+
+    sprintf(payload,proxJson,mqttTopic,"state");
+    sprintf(topic,"%s_proximity/%s",mqttTopic,"config");
+
+    publishMes(topic,payload);
+
+    sprintf(payload,statusJson,mqttTopic,"state");
+    sprintf(topic,"%s_status/%s",mqttTopic,"config");
+
+    publishMes(topic,payload);
+
+    sprintf(payload,batteryJson,mqttTopic,"state");
+    sprintf(topic,"%s_battery/%s",mqttTopic,"config");
+
+    publishMes(topic,payload);
+
+    sprintf(payload,lifecycleJson,mqttTopic,"state");
+    sprintf(topic,"%s_lifecycle/%s",mqttTopic,"config");
+
+    return publishMes(topic,payload);
+
+}
+
+boolean publishLifecycle(const char *lc) {
+    char payload[100];
+    sprintf(payload, "{\"lifecycle\":\"%.9s\"}", lc);
+    Serial.println(payload);
+
+    char topic[MQTT_TOPIC_LENGTH + 10];
+    sprintf(topic,"%s/%s",mqttTopic,"state");
 
     return publishMes(topic,payload);
 }
 
-boolean publishData(uint8_t prox, uint8_t flagADC, uint8_t battery, uint8_t temperature) {
+boolean publishData(uint16_t prox, char *status, double battery, double temperature) {
 
     char payload[100];
-    double batt = ((double)battery+200)/100;
-    double temp = ((double)temperature)/2 -30;
-    sprintf(payload,stateJson,prox,flagADC,batt,temp);
+    sprintf(payload,stateJson,prox,status,battery,temperature);
     Serial.println(payload);
 
     char topic[MQTT_TOPIC_LENGTH + 10];
@@ -99,4 +131,8 @@ void initMQTT() {
     mqttClient.setCallback(mqttCallback);
     
     sprintf(subName, "maildisplay-%s", &(WiFi.macAddress().c_str())[9]);
+    Serial.println(subName);
+
+    publishConfig();
+    publishLifecycle("START");
 }

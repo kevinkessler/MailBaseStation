@@ -34,16 +34,6 @@
 #include "LoRa_E32.h"
 #include "maildisplay.h"
 
-//#include <WiFiClientSecure.h>
-//#include <MQTT.h>
-//#include <ESPmDNS.h>
-//#include <ArduinoOTA.h>
-//#include <FS.h>
-//#include <SPIFFS.h>
-//#include "ArduinoJson.h"
-
-//#include "E32Lora.h"
-
 const char *hostname = "maildisplay";
 char mqttServer[MQTT_SERVER_LENGTH];
 char mqttTopic[MQTT_TOPIC_LENGTH];
@@ -72,7 +62,6 @@ LoRa_E32 lora(&Serial2,16,17, aux, m0, m1);
 volatile bool sendHeartbeat = false;
 
 Servo mailServo;
-//E32Lora e(Serial2);
 
 uint8_t servoPin = 22;
 uint16_t minUs = 500;
@@ -209,21 +198,6 @@ void otaSetup() {
   ArduinoOTA.begin();
 }
 
-/*void e32Setup() {
-  e.begin(m0,m1,aux);
-  e.setMode(CONFIG_MODE);
-  e.setTransmissionMode(TxMode_Fixed);
-  e.setAddress(0x00);
-  e.setChannel(0xf);
-  e.setTargetAddress(0x02);
-  e.setTargetChannel(0x0f);
-  e.saveParams();
-  e.setMode(NORMAL_MODE); 
-  e.reset();
-
-}*/
-
-
 void e32Setup() {
   lora.begin();
 
@@ -270,6 +244,7 @@ void setup() {
   mailServo.attach(servoPin, minUs, maxUs);
   mailServo.write(0);
 
+
   pinMode(CONFIG_BUTTON,INPUT);
   attachInterrupt(CONFIG_BUTTON, longPress, CHANGE);
 
@@ -281,43 +256,17 @@ void setup() {
 }
 
 void loop() {
-/*  if (sendHeartbeat) {
+if (sendHeartbeat) {
     Serial.println("Sending Beat");
-    sendMQTTMessage(0,0,0,0);
+    publishLifecycle("HB");
 
     sendHeartbeat = false;
-  } */
-
-  /*if(e.dataAvailable()) {
-    Serial.print("Data ");
-    uint8_t data[4];
-    e.receiveData(data, 4);
-    for(int n=0;n<4;n++) {
-      Serial.print(data[n],HEX);
-      Serial.print(" ");
-    }
-    Serial.println("");*/
-
-    // Sensor threshold for mail 40, Flag ADC threshhold AC
-    /*if((data[0] > 0x40) && (data[1] > 0xAC)){
-        mailServo.write(90);
-    } else {
-      mailServo.write(0);
-    }
-    publishData(data[0],data[1],data[2],data[3]);
-  } */
+  } 
 
   if(lora.available()>1) {
     ResponseStructContainer rc = lora.receiveMessage(4);
     Serial.println(rc.status.code);
-    char bar[4];
-    bar[0]=0x90;
-    bar[1]=0x01;
-    bar[2]=0xaa;
-    bar[3]=0xbb;
-    String foo=String(bar);
 
-    //memcpy(data,rc.data.c_str(),sizeof(data));
     uint8_t *data=(uint8_t *)rc.data;
     
     for(int n=0;n<4;n++) {
@@ -325,7 +274,22 @@ void loop() {
       Serial.print(" ");
     }
     Serial.println("");
-    publishData(data[0],data[1],data[2],data[3]);
+
+    uint16_t prox=(data[1]<<8) + data[0];
+    char status[5];
+    if(prox == 0xffff) {
+      strcpy(status,"OPEN");
+    } else if (prox < MAIL_THRESHOLD) {
+      strcpy(status,"NONE");
+      mailServo.write(0);
+    } else {
+      strcpy(status,"MAIL");
+      mailServo.write(90);
+    }
+
+    double batt = ((double)data[2]+200)/100;
+    double temp = ((double)data[3])/2 -30;    
+    publishData(prox,status,batt,temp);
 
   }
 
