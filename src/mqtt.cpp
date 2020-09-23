@@ -29,6 +29,11 @@ WiFiClient espClient;
 PubSubClient mqttClient(espClient);
 char subName[25];
 
+char prev_status[5]="????";
+uint16_t prev_prox=0xFFFF;
+double prev_temp=-99.0;
+double prev_batt=10.0;
+
 extern char mqttServer[MQTT_SERVER_LENGTH];
 extern char mqttTopic[MQTT_TOPIC_LENGTH];
 extern uint16_t mqttPort;
@@ -37,7 +42,7 @@ const char *tempJson = "{\"device_class\":\"temperature\",\"name\": \"Mail_Tempe
 const char *proxJson = "{\"name\": \"Mail_Proximity\",\"state_topic\": \"%s/%s\", \"unit_of_measurement\": \"Count\", \"value_template\": \"{{ value_json.mailproximity}}\" }";
 const char *statusJson = "{\"name\": \"Mail_Status\",\"state_topic\": \"%s/%s\", \"value_template\": \"{{ value_json.status}}\" }";
 const char *batteryJson = "{\"name\": \"Mail_Battery\",\"state_topic\": \"%s/%s\", \"unit_of_measurement\": \"V\", \"value_template\": \"{{ value_json.battery}}\" }";
-const char *stateJson = "{\"lifecycle\":\"UPDATE\", \"mailproximity\":%d, \"status\":\"%.9s\",\"battery\":%.2f,\"temperature\":%.1f}";
+const char *stateJson = "{\"lifecycle\":\"%s\", \"mailproximity\":%d, \"status\":\"%.9s\",\"battery\":%.2f,\"temperature\":%.1f}";
 const char *lifecycleJson = "{\"name\": \"Mail_Lifecycle\",\"state_topic\": \"%s/%s\", \"unit_of_measurement\": \"\", \"value_template\": \"{{ value_json.lifecycle}}\" }";
 
 void mqttCallback(char *topic, byte *payload, uint16_t length) {
@@ -104,7 +109,7 @@ boolean publishConfig() {
 
 boolean publishLifecycle(const char *lc) {
     char payload[100];
-    sprintf(payload, "{\"lifecycle\":\"%.9s\"}", lc);
+    sprintf(payload,stateJson,lc,prev_prox,prev_status,prev_batt,prev_temp);
     Serial.println(payload);
 
     char topic[MQTT_TOPIC_LENGTH + 10];
@@ -116,7 +121,13 @@ boolean publishLifecycle(const char *lc) {
 boolean publishData(uint16_t prox, char *status, double battery, double temperature) {
 
     char payload[100];
-    sprintf(payload,stateJson,prox,status,battery,temperature);
+
+    strcpy(prev_status,status);
+    prev_prox=prox;
+    prev_batt=battery;
+    prev_temp=temperature;
+
+    sprintf(payload,stateJson,"UPDATE",prox,status,battery,temperature);
     Serial.println(payload);
 
     char topic[MQTT_TOPIC_LENGTH + 10];

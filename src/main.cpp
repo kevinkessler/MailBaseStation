@@ -57,7 +57,7 @@ uint8_t m0=12;
 uint8_t m1=14;
 uint8_t aux=13;
 
-LoRa_E32 lora(&Serial2,16,17, aux, m0, m1);
+LoRa_E32 lora(16, 17, &Serial2, aux, m0, m1, UART_BPS_RATE_9600);
 
 volatile bool sendHeartbeat = false;
 
