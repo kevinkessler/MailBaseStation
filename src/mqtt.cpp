@@ -52,6 +52,7 @@ void mqttCallback(char *topic, byte *payload, uint16_t length) {
 static void reconnect() {
     if(mqttClient.connect(subName)) {
         Serial.println("MQTT Connected");
+        publishConfig();
     } else {
         char errorMes[50];
         sprintf(errorMes, "MQTT Connection failed, rc=%d",mqttClient.state());
