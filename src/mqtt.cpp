@@ -61,13 +61,13 @@ static void reconnect() {
 
 }
 
-static boolean publishMes(char *topic, char *payload) {
+static boolean publishMes(char *topic, char *payload, boolean retained) {
     if(!mqttClient.connected())
         reconnect();
         if(!mqttClient.connected())
             return false;
 
-    if(!mqttClient.publish(topic, payload)) {
+    if(!mqttClient.publish(topic, payload, retained)) {
         char errorMes[50];
         sprintf(errorMes, "MQTT Publish failed, rc=%d",mqttClient.state());
         Serial.println(errorMes);
@@ -84,27 +84,27 @@ boolean publishConfig() {
     sprintf(payload,tempJson,mqttTopic,"state");
     sprintf(topic,"%s_temperature/%s",mqttTopic,"config");
 
-    publishMes(topic,payload);
+    publishMes(topic,payload,true);
 
     sprintf(payload,proxJson,mqttTopic,"state");
     sprintf(topic,"%s_proximity/%s",mqttTopic,"config");
 
-    publishMes(topic,payload);
+    publishMes(topic,payload,true);
 
     sprintf(payload,statusJson,mqttTopic,"state");
     sprintf(topic,"%s_status/%s",mqttTopic,"config");
 
-    publishMes(topic,payload);
+    publishMes(topic,payload,true);
 
     sprintf(payload,batteryJson,mqttTopic,"state");
     sprintf(topic,"%s_battery/%s",mqttTopic,"config");
 
-    publishMes(topic,payload);
+    publishMes(topic,payload,true);
 
     sprintf(payload,lifecycleJson,mqttTopic,"state");
     sprintf(topic,"%s_lifecycle/%s",mqttTopic,"config");
 
-    return publishMes(topic,payload);
+    return publishMes(topic,payload,true);
 
 }
 
@@ -116,7 +116,7 @@ boolean publishLifecycle(const char *lc) {
     char topic[MQTT_TOPIC_LENGTH + 10];
     sprintf(topic,"%s/%s",mqttTopic,"state");
 
-    return publishMes(topic,payload);
+    return publishMes(topic,payload,false);
 }
 
 boolean publishData(uint16_t prox, char *status, double battery, double temperature) {
@@ -134,7 +134,7 @@ boolean publishData(uint16_t prox, char *status, double battery, double temperat
     char topic[MQTT_TOPIC_LENGTH + 10];
     sprintf(topic,"%s/%s",mqttTopic,"state");
 
-    return publishMes(topic,payload);
+    return publishMes(topic,payload,false);
 }
 
 
