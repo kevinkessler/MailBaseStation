@@ -42,6 +42,7 @@ bool configMode = false;
 uint8_t flash_toggle=0;
 volatile bool buttonLongPress = false; 
 volatile uint32_t lastPressTime;
+uint16_t wifi_check = 30000;
 
 Ticker heartBeat(publishHeartbeat, 300000);
 
@@ -256,6 +257,13 @@ void setup() {
 }
 
 void loop() {
+  if ((WiFi.status() != WL_CONNECTED) && (millis() > wifi_check)){
+    Serial.println("Wifi Reconnect");
+    WiFi.disconnect();
+    callWFM(true);
+    wifi_check = millis() +30000;
+  }
+
 if (sendHeartbeat) {
     Serial.println("Sending Beat");
     publishLifecycle("HB");
